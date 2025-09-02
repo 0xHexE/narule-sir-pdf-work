@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 from celery import Celery
 from celery.result import AsyncResult
 import time
+from metrics_utils import load_task_metrics, load_metrics
 
 # Create FastAPI app
 app = FastAPI(title="Task Monitor", description="Monitor and manage Celery tasks")
@@ -231,7 +232,7 @@ async def delete_task(task_id: str):
 
 @app.get("/api/metrics")
 async def get_metrics():
-    """Get metrics from the metrics.json file if it exists"""
+    """Get metrics from the global metrics.json file if it exists (backward compatibility)"""
     try:
         if os.path.exists("metrics.json"):
             with open("metrics.json", "r") as f:
@@ -241,6 +242,15 @@ async def get_metrics():
             return {"metrics": []}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading metrics: {str(e)}")
+
+@app.get("/api/task/{task_id}/metrics")
+async def get_task_metrics(task_id: str):
+    """Get metrics for a specific task"""
+    try:
+        metrics = load_task_metrics(task_id)
+        return {"task_id": task_id, "metrics": metrics}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading metrics for task {task_id}: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

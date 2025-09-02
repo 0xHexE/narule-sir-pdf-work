@@ -56,10 +56,10 @@ def run_federated_server(self, strategy_config: Dict[str, Any], num_rounds: int 
         strategy_params = strategy_config.get('strategy_params', {})
 
         if strategy_type == 'top_k':
-            strategy = TopKModelSelectionStrategy(**strategy_params)
+            strategy = TopKModelSelectionStrategy(task_id=self.request.id, **strategy_params)
         
         elif strategy_type == 'adaptive':
-            strategy = AdaptiveClientSelectionStrategy(**strategy_params)
+            strategy = AdaptiveClientSelectionStrategy(task_id=self.request.id, **strategy_params)
 
         else:
             print("Invalid strategy type. ")
@@ -82,7 +82,8 @@ def run_federated_server(self, strategy_config: Dict[str, Any], num_rounds: int 
             'strategy_type': strategy_config.get('strategy_type', 'default'),
             'strategy_params': strategy_config.get('strategy_params', {}),
             'rounds_completed': num_rounds,
-            'completed_at': time.time()
+            'completed_at': time.time(),
+            'task_id': self.request.id  # Include task ID in result
         }
         
         # Save result in /tasks/{taskid}/data.json format
@@ -105,7 +106,8 @@ def run_federated_server(self, strategy_config: Dict[str, Any], num_rounds: int 
             'stack_trace': error_traceback,
             'strategy_type': strategy_config.get('strategy_type', 'default'),
             'strategy_params': strategy_config.get('strategy_params', {}),
-            'failed_at': time.time()
+            'failed_at': time.time(),
+            'task_id': self.request.id  # Include task ID in error result
         }
         
         # Save error result in /tasks/{taskid}/data.json format

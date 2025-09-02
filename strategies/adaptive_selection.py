@@ -5,16 +5,19 @@ from flwr.server.client_proxy import ClientProxy
 from flwr.common.typing import FitRes, EvaluateRes
 from collections import defaultdict
 import random
+from metrics_utils import update_task_metrics
 
 
 class AdaptiveClientSelectionStrategy(fl.server.strategy.FedAvg):
-    def __init__(self, selection_ratio: float = 0.5, metric: str = "accuracy", 
-                 history_weight: float = 0.7, exploration_factor: float = 0.1, *args, **kwargs):
+    def __init__(self, selection_ratio: float = 0.5, metric: str = "accuracy",
+                 history_weight: float = 0.7, exploration_factor: float = 0.1,
+                 task_id: str = "", *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.selection_ratio = selection_ratio  # Ratio of clients to select
         self.metric = metric  # Metric to use for selection
         self.history_weight = history_weight  # Weight for historical performance
         self.exploration_factor = exploration_factor  # Factor for exploration vs exploitation
+        self.task_id = task_id  # Task ID for per-task metrics
         
         # Store client performance history: {client_id: [metric_value1, metric_value2, ...]}
         self.client_history = defaultdict(list)
@@ -24,9 +27,11 @@ class AdaptiveClientSelectionStrategy(fl.server.strategy.FedAvg):
         self, server_round: int, parameters, client_manager
     ):
         """Configure the next round of training with adaptive client selection."""
-        # Get all available clients
-        clients = client_manager.all()
-        client_ids = [client.cid for client in clients]
+        # Get the default configuration from parent first
+        default_configs = super().configure_fit(server_round, parameters, client_manager)
+        
+        # Extract client IDs from the default configurations
+        client_ids = [client_proxy.cid for client_proxy, _ in default_configs]
         
         # Calculate number of clients to select
         num_clients_to_select = max(1, int(len(client_ids) * self.selection_ratio))
@@ -46,15 +51,13 @@ class AdaptiveClientSelectionStrategy(fl.server.strategy.FedAvg):
             
             print(f"Round {server_round}: Adaptively selected {num_clients_to_select} clients: {selected_clients}")
         
-        # Configure fit for selected clients
-        config = {}
-        for client_id in selected_clients:
-            # Find the client object
-            client_obj = next((c for c in clients if c.cid == client_id), None)
-            if client_obj:
-                config[client_obj] = super().configure_fit(server_round, parameters, client_manager)
+        # Filter the default configurations to only include selected clients
+        configs_for_selected = []
+        for client_proxy, fit_ins in default_configs:
+            if client_proxy.cid in selected_clients:
+                configs_for_selected.append((client_proxy, fit_ins))
         
-        return config
+        return configs_for_selected
     
     def _calculate_selection_probabilities(self, client_ids: List[str]) -> Dict[str, float]:
         """Calculate selection probabilities based on historical performance."""
@@ -140,6 +143,29 @@ class AdaptiveClientSelectionStrategy(fl.server.strategy.FedAvg):
                 self.client_scores[client_id] = alpha * metric_value + (1 - alpha) * prev_score
         
         print(f"Round {server_round}: Updated client scores: {dict(self.client_scores)}")
+        
+        # Extract and store loss and accuracy metrics
+        if results:
+            # Calculate average loss and accuracy across all clients
+            total_loss = 0
+            total_accuracy = 0
+            count = 0
+            
+            for _, result in results:
+                # Loss is the first element of the tuple returned by client.evaluate()
+                # result.loss contains the actual loss value
+                loss_value = result.loss
+                accuracy_value = result.metrics.get('accuracy', 0)
+                total_loss += loss_value
+                total_accuracy += accuracy_value
+                count += 1
+            
+            if count > 0:
+                avg_loss = total_loss / count
+                avg_accuracy = total_accuracy / count
+                if self.task_id:
+                    update_task_metrics(self.task_id, server_round, avg_accuracy, avg_loss)
+                print(f"Round {server_round}: Average loss={avg_loss:.4f}, accuracy={avg_accuracy:.4f}")
         
         # Call parent aggregate_evaluate
         return super().aggregate_evaluate(server_round, results, failures)

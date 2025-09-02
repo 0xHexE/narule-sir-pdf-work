@@ -85,6 +85,46 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h6 class="card-title mb-0">
+                            <i class="fas fa-compress-alt me-2"></i>Compare Tasks
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Select Tasks to Compare (2-4 tasks)</label>
+                            <select class="form-select" id="compareTasks" multiple size="4">
+                                <!-- Task options will be populated dynamically -->
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Metric to Compare</label>
+                            <select class="form-select" id="compareMetric">
+                                <option value="accuracy">Accuracy</option>
+                                <option value="loss">Loss</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-outline-primary w-100" onclick="compareSelectedTasks()">
+                            <i class="fas fa-chart-bar me-2"></i>Compare Selected Tasks
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card mt-4" id="comparisonResults" style="display: none;">
+                    <div class="card-header">
+                        <h6 class="card-title mb-0">
+                            <i class="fas fa-chart-bar me-2"></i>Comparison Results
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div id="comparisonChartContainer" style="height: 300px;">
+                            <canvas id="comparisonChart"></canvas>
+                        </div>
+                        <div id="comparisonStats" class="mt-3"></div>
+                    </div>
+                </div>
             </div>
 
             <!-- Main Content -->
@@ -136,6 +176,9 @@
     <script>
         let currentTaskId = null;
         let metricsChart = null;
+        let taskMetricsChart = null;
+        let comparisonChart = null;
+        let allTasks = [];
 
         // Initialize page
         document.addEventListener('DOMContentLoaded', function() {
@@ -179,8 +222,20 @@
             }
         }
 
+        async function loadTaskMetrics(taskId) {
+            try {
+                const response = await fetch(`/api/task/${taskId}/metrics`);
+                const data = await response.json();
+                return data.metrics;
+            } catch (error) {
+                console.error('Error loading task metrics:', error);
+                return [];
+            }
+        }
+
         function displayTasks(tasks) {
             const container = document.getElementById('tasksList');
+            allTasks = tasks; // Store tasks for comparison
             
             if (tasks.length === 0) {
                 container.innerHTML = `
@@ -191,6 +246,9 @@
                         </div>
                     </div>
                 `;
+                
+                // Clear comparison dropdown
+                document.getElementById('compareTasks').innerHTML = '';
                 return;
             }
 
@@ -220,6 +278,9 @@
                     </div>
                 `;
             }).join('');
+            
+            // Update comparison dropdown
+            updateComparisonDropdown(tasks);
         }
 
         function getStrategyDisplayName(taskData) {
@@ -258,6 +319,55 @@
                 const task = await response.json();
                 
                 const modalBody = document.getElementById('taskDetails');
+                
+                // Load metrics to display in the modal
+                let metricsHtml = '';
+                let chartHtml = '';
+                try {
+                    const taskMetrics = await loadTaskMetrics(taskId);
+                    
+                    if (taskMetrics && taskMetrics.length > 0) {
+                        const latestRound = taskMetrics[taskMetrics.length - 1];
+                        metricsHtml = `
+                            <div class="mt-3">
+                                <h6>Latest Metrics</h6>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="card bg-light">
+                                            <div class="card-body text-center">
+                                                <h6 class="card-title">Latest Loss</h6>
+                                                <h3 class="text-danger">${latestRound.loss.toFixed(4)}</h3>
+                                                <small class="text-muted">Round ${latestRound.round}</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="card bg-light">
+                                            <div class="card-body text-center">
+                                                <h6 class="card-title">Latest Accuracy</h6>
+                                                <h3 class="text-success">${(latestRound.accuracy * 100).toFixed(2)}%</h3>
+                                                <small class="text-muted">Round ${latestRound.round}</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        
+                        // Create chart for the modal
+                        chartHtml = `
+                            <div class="mt-3">
+                                <h6>Training Progress</h6>
+                                <div style="height: 300px;">
+                                    <canvas id="taskMetricsChart"></canvas>
+                                </div>
+                            </div>
+                        `;
+                    }
+                } catch (error) {
+                    console.error('Error loading task metrics for modal:', error);
+                }
+                
                 modalBody.innerHTML = `
                     <div class="row">
                         <div class="col-md-6">
@@ -274,11 +384,21 @@
                             ${task.data.error ? `<p><strong>Error:</strong> ${task.data.error}</p>` : ''}
                         </div>
                     </div>
+                    ${metricsHtml}
+                    ${chartHtml}
                     <div class="mt-3">
                         <h6>Details</h6>
                         <pre class="bg-light p-3 rounded">${JSON.stringify(task.data, null, 2)}</pre>
                     </div>
                 `;
+                
+                // Render chart after modal is shown
+                const taskMetrics = await loadTaskMetrics(taskId);
+                if (taskMetrics && taskMetrics.length > 0) {
+                    setTimeout(() => {
+                        renderTaskMetricsChart('taskMetricsChart', taskMetrics);
+                    }, 100);
+                }
                 
                 const modal = new bootstrap.Modal(document.getElementById('taskModal'));
                 modal.show();
@@ -415,6 +535,74 @@
             });
         }
 
+        function renderTaskMetricsChart(canvasId, metrics) {
+            if (taskMetricsChart) {
+                taskMetricsChart.destroy();
+            }
+            
+            const ctx = document.getElementById(canvasId);
+            if (!ctx) return;
+            
+            const rounds = metrics.map(m => m.round);
+            const accuracies = metrics.map(m => m.accuracy);
+            const losses = metrics.map(m => m.loss);
+            
+            taskMetricsChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: rounds,
+                    datasets: [
+                        {
+                            label: 'Accuracy',
+                            data: accuracies,
+                            borderColor: '#0d6efd',
+                            backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                            fill: true,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Loss',
+                            data: losses,
+                            borderColor: '#dc3545',
+                            backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                            fill: true,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: 'Accuracy'
+                            },
+                            min: 0,
+                            max: 1
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'Loss'
+                            },
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                            min: 0
+                        }
+                    }
+                }
+            });
+        }
+
         function refreshTasks() {
             loadTasks();
             loadMetrics();
@@ -444,6 +632,169 @@
             toast.addEventListener('hidden.bs.toast', () => {
                 document.body.removeChild(toastContainer);
             });
+        }
+
+        // Comparison functions
+        function updateComparisonDropdown(tasks) {
+            const compareSelect = document.getElementById('compareTasks');
+            compareSelect.innerHTML = '';
+            
+            // Only show completed tasks for comparison
+            const completedTasks = tasks.filter(task => task.status === 'completed');
+            
+            completedTasks.forEach(task => {
+                const option = document.createElement('option');
+                option.value = task.id;
+                option.textContent = `${task.id} - ${getStrategyDisplayName(task.data)} (${task.data.rounds_completed} rounds)`;
+                compareSelect.appendChild(option);
+            });
+        }
+
+        async function compareSelectedTasks() {
+            const selectedOptions = Array.from(document.getElementById('compareTasks').selectedOptions);
+            const metric = document.getElementById('compareMetric').value;
+            
+            if (selectedOptions.length < 2 || selectedOptions.length > 4) {
+                showToast('Please select 2 to 4 tasks to compare', 'warning');
+                return;
+            }
+            
+            const taskIds = selectedOptions.map(option => option.value);
+            const comparisonResults = document.getElementById('comparisonResults');
+            
+            // Show loading state
+            comparisonResults.style.display = 'block';
+            document.getElementById('comparisonChartContainer').innerHTML = '<div class="text-center py-5"><i class="fas fa-spinner fa-spin fa-2x"></i><p>Loading comparison data...</p></div>';
+            document.getElementById('comparisonStats').innerHTML = '';
+            
+            try {
+                // Load metrics for all selected tasks
+                const metricsPromises = taskIds.map(taskId => loadTaskMetrics(taskId));
+                const allMetrics = await Promise.all(metricsPromises);
+                
+                // Get task details for labels
+                const taskDetails = [];
+                for (const taskId of taskIds) {
+                    const task = allTasks.find(t => t.id === taskId);
+                    if (task) {
+                        taskDetails.push({
+                            id: taskId,
+                            strategy: getStrategyDisplayName(task.data),
+                            rounds: task.data.rounds_completed
+                        });
+                    }
+                }
+                
+                // Render comparison chart
+                renderComparisonChart(taskDetails, allMetrics, metric);
+                
+                // Show comparison stats
+                showComparisonStats(taskDetails, allMetrics, metric);
+                
+            } catch (error) {
+                console.error('Error comparing tasks:', error);
+                showToast('Error loading comparison data', 'danger');
+                comparisonResults.style.display = 'none';
+            }
+        }
+
+        function renderComparisonChart(taskDetails, allMetrics, metric) {
+            if (comparisonChart) {
+                comparisonChart.destroy();
+            }
+            
+            const ctx = document.createElement('canvas');
+            document.getElementById('comparisonChartContainer').innerHTML = '';
+            document.getElementById('comparisonChartContainer').appendChild(ctx);
+            
+            const datasets = [];
+            const colors = ['#0d6efd', '#dc3545', '#198754', '#ffc107']; // Blue, Red, Green, Yellow
+            
+            taskDetails.forEach((task, index) => {
+                const metrics = allMetrics[index];
+                if (metrics && metrics.length > 0) {
+                    const data = metrics.map(m => metric === 'accuracy' ? m.accuracy : m.loss);
+                    const rounds = metrics.map(m => m.round);
+                    
+                    datasets.push({
+                        label: `${task.strategy} (${task.id})`,
+                        data: data,
+                        borderColor: colors[index % colors.length],
+                        backgroundColor: colors[index % colors.length] + '20',
+                        fill: false,
+                        tension: 0.1
+                    });
+                }
+            });
+            
+            comparisonChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: Array.from({length: Math.max(...allMetrics.map(m => m.length))}, (_, i) => i + 1),
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            title: {
+                                display: true,
+                                text: metric === 'accuracy' ? 'Accuracy' : 'Loss'
+                            },
+                            beginAtZero: metric === 'accuracy'
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Round'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `Comparison of ${metric} across tasks`
+                        }
+                    }
+                }
+            });
+        }
+
+        function showComparisonStats(taskDetails, allMetrics, metric) {
+            const statsContainer = document.getElementById('comparisonStats');
+            let statsHtml = '<h6>Comparison Statistics</h6><div class="row">';
+            
+            taskDetails.forEach((task, index) => {
+                const metrics = allMetrics[index];
+                if (metrics && metrics.length > 0) {
+                    const values = metrics.map(m => metric === 'accuracy' ? m.accuracy : m.loss);
+                    const finalValue = values[values.length - 1];
+                    const maxValue = Math.max(...values);
+                    const minValue = Math.min(...values);
+                    const avgValue = values.reduce((a, b) => a + b, 0) / values.length;
+                    
+                    statsHtml += `
+                        <div class="col-md-6 col-lg-3 mb-3">
+                            <div class="card">
+                                <div class="card-header">
+                                    <strong>${task.strategy}</strong>
+                                    <small class="text-muted d-block">${task.id}</small>
+                                </div>
+                                <div class="card-body">
+                                    <p class="mb-1">Final ${metric}: <strong>${metric === 'accuracy' ? (finalValue * 100).toFixed(2) + '%' : finalValue.toFixed(4)}</strong></p>
+                                    <p class="mb-1">Average: <strong>${metric === 'accuracy' ? (avgValue * 100).toFixed(2) + '%' : avgValue.toFixed(4)}</strong></p>
+                                    <p class="mb-1">Max: <strong>${metric === 'accuracy' ? (maxValue * 100).toFixed(2) + '%' : maxValue.toFixed(4)}</strong></p>
+                                    <p class="mb-0">Min: <strong>${metric === 'accuracy' ? (minValue * 100).toFixed(2) + '%' : minValue.toFixed(4)}</strong></p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+            
+            statsHtml += '</div>';
+            statsContainer.innerHTML = statsHtml;
         }
     </script>
 </body>
