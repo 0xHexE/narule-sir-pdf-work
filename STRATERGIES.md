@@ -1,0 +1,2 @@
+Top-K Model Selection Description: Selects only the top K best-performing clients based on a chosen metric (accuracy, loss, etc.) and aggregates only their model updates. This focuses learning on high-quality contributions.
+Adaptive Client Selection Description: Dynamically selects clients based on their historical performance. Maintains a performance history for each client and prioritizes those with consistently better results in subsequent rounds.

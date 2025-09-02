@@ -1,0 +1,82 @@
+/* Additional custom styles for the task monitor */
+body {
+    background-color: #f8f9fa;
+}
+
+.navbar-brand {
+    font-weight: 600;
+}
+
+.card {
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    border: 1px solid rgba(0, 0, 0, 0.125);
+}
+
+.task-card {
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+}
+
+.task-card:hover {
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    transform: translateY(-2px);
+}
+
+.status-badge {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+}
+
+.metrics-chart {
+    min-height: 250px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 0.5rem;
+    padding: 1rem;
+}
+
+.toast-container {
+    z-index: 9999;
+}
+
+/* Status-specific colors */
+.completed {
+    border-left: 4px solid #198754;
+}
+
+.running {
+    border-left: 4px solid #ffc107;
+}
+
+.failed {
+    border-left: 4px solid #dc3545;
+}
+
+.pending {
+    border-left: 4px solid #6c757d;
+}
+
+/* Loading animation */
+.loading-spinner {
+    display: inline-block;
+    width: 2rem;
+    height: 2rem;
+    border: 0.25em solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spinner-border 0.75s linear infinite;
+}
+
+@keyframes spinner-border {
+    to { transform: rotate(360deg); }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .container-fluid {
+        padding: 0 1rem;
+    }
+    
+    .card {
+        margin-bottom: 1rem;
+    }
+}
